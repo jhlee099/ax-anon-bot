@@ -4,6 +4,9 @@ const crypto = require('crypto');
 const client = new WebClient(process.env.SLACK_BOT_TOKEN);
 const TARGET_CHANNEL_ID = 'C0AUZDBKGLW';
 
+// 중복 이벤트 방지 (Slack 재시도 처리)
+const processedEvents = new Set();
+
 function verifySlackSignature(timestamp, slackSignature, rawBody) {
   if (!timestamp || !slackSignature) return false;
   if (Math.abs(Date.now() / 1000 - Number(timestamp)) > 300) return false;
@@ -35,6 +38,15 @@ module.exports = async (req, res) => {
   // URL 검증 challenge
   if (body.type === 'url_verification') {
     return res.status(200).json({ challenge: body.challenge });
+  }
+
+  // 중복 이벤트 무시
+  const eventId = body.event_id;
+  if (eventId) {
+    if (processedEvents.has(eventId)) {
+      return res.status(200).send('ok');
+    }
+    processedEvents.add(eventId);
   }
 
   // 이벤트 처리
