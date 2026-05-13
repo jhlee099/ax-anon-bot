@@ -32,16 +32,9 @@ module.exports = async (req, res) => {
   const body = req.body;
   const rawBody = JSON.stringify(body);
 
-  // URL 검증 challenge는 서명 검증 없이 즉시 응답
+  // URL 검증 challenge
   if (body.type === 'url_verification') {
     return res.status(200).json({ challenge: body.challenge });
-  }
-
-  const timestamp = req.headers['x-slack-request-timestamp'];
-  const slackSignature = req.headers['x-slack-signature'];
-
-  if (!verifySlackSignature(timestamp, slackSignature, rawBody)) {
-    return res.status(401).send('Unauthorized');
   }
 
   // 이벤트 처리
