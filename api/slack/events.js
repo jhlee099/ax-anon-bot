@@ -2,7 +2,7 @@ const { WebClient } = require('@slack/web-api');
 const crypto = require('crypto');
 
 const client = new WebClient(process.env.SLACK_BOT_TOKEN);
-const TARGET_CHANNEL = 'ax_라운지';
+const TARGET_CHANNEL_ID = 'C0AUZDBKGLW';
 
 function verifySlackSignature(timestamp, slackSignature, rawBody) {
   if (!timestamp || !slackSignature) return false;
@@ -50,25 +50,8 @@ module.exports = async (req, res) => {
       event.text.trim() !== ''
     ) {
       try {
-        const channelList = await client.conversations.list({
-          types: 'public_channel,private_channel',
-          limit: 1000,
-        });
-
-        const channel = channelList.channels.find(
-          (c) => c.name === TARGET_CHANNEL
-        );
-
-        if (!channel) {
-          await client.chat.postMessage({
-            channel: event.channel,
-            text: '채널을 찾을 수 없습니다. 관리자에게 문의해주세요.',
-          });
-          return res.status(200).send('ok');
-        }
-
         await client.chat.postMessage({
-          channel: channel.id,
+          channel: TARGET_CHANNEL_ID,
           text: `💬 *익명 질문*\n\n${event.text}`,
           blocks: [
             {
