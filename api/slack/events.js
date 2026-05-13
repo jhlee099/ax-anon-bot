@@ -1,71 +1,117 @@
-const { App, ExpressReceiver } = require('@slack/bolt');
+const { WebClient } = require('@slack/web-api');
+const crypto = require('crypto');
 
-const receiver = new ExpressReceiver({
-  signingSecret: process.env.SLACK_SIGNING_SECRET,
-  endpoints: '/api/slack/events',
-});
-
-const app = new App({
-  token: process.env.SLACK_BOT_TOKEN,
-  receiver,
-});
-
+const client = new WebClient(process.env.SLACK_BOT_TOKEN);
 const TARGET_CHANNEL = 'ax_라운지';
 
-// 사용자가 봇에게 DM 보내면 익명으로 채널에 포스팅
-app.message(async ({ message, client, say }) => {
-  // 봇 메시지나 채널 메시지 무시, DM만 처리
-  if (message.channel_type !== 'im') return;
-  if (message.subtype) return;
-  if (!message.text || message.text.trim() === '') return;
+function verifySlackSignature(req, rawBody) {
+  const timestamp = req.headers['x-slack-request-timestamp'];
+  const slackSignature = req.headers['x-slack-signature'];
 
-  try {
-    // 채널 ID 조회
-    const channelList = await client.conversations.list({
-      types: 'public_channel,private_channel',
-      limit: 1000,
-    });
+  if (!timestamp || !slackSignature) return false;
 
-    const channel = channelList.channels.find(
-      (c) => c.name === TARGET_CHANNEL
-    );
+  // 5분 이상 된 요청 거부
+  if (Math.abs(Date.now() / 1000 - Number(timestamp)) > 300) return false;
 
-    if (!channel) {
-      await say('채널을 찾을 수 없습니다. 관리자에게 문의해주세요.');
-      return;
-    }
+  const sigBase = `v0:${timestamp}:${rawBody}`;
+  const hmac = crypto
+    .createHmac('sha256', process.env.SLACK_SIGNING_SECRET)
+    .update(sigBase)
+    .digest('hex');
+  const computed = `v0=${hmac}`;
 
-    // 익명으로 채널에 포스팅
-    await client.chat.postMessage({
-      channel: channel.id,
-      text: `💬 *익명 질문*\n\n${message.text}`,
-      blocks: [
-        {
-          type: 'section',
-          text: {
-            type: 'mrkdwn',
-            text: `💬 *익명 질문*\n\n${message.text}`,
-          },
-        },
-        {
-          type: 'context',
-          elements: [
+  return crypto.timingSafeEqual(Buffer.from(computed), Buffer.from(slackSignature));
+}
+
+async function getRawBody(req) {
+  return new Promise((resolve, reject) => {
+    let data = '';
+    req.on('data', (chunk) => (data += chunk));
+    req.on('end', () => resolve(data));
+    req.on('error', reject);
+  });
+}
+
+module.exports = async (req, res) => {
+  if (req.method !== 'POST') {
+    return res.status(405).send('Method Not Allowed');
+  }
+
+  const rawBody = await getRawBody(req);
+
+  if (!verifySlackSignature(req, rawBody)) {
+    return res.status(401).send('Unauthorized');
+  }
+
+  const body = JSON.parse(rawBody);
+
+  // URL 검증 challenge
+  if (body.type === 'url_verification') {
+    return res.status(200).json({ challenge: body.challenge });
+  }
+
+  // 이벤트 처리
+  if (body.event) {
+    const event = body.event;
+
+    // DM 메시지만 처리
+    if (
+      event.type === 'message' &&
+      event.channel_type === 'im' &&
+      !event.subtype &&
+      event.text &&
+      event.text.trim() !== ''
+    ) {
+      try {
+        const channelList = await client.conversations.list({
+          types: 'public_channel,private_channel',
+          limit: 1000,
+        });
+
+        const channel = channelList.channels.find(
+          (c) => c.name === TARGET_CHANNEL
+        );
+
+        if (!channel) {
+          await client.chat.postMessage({
+            channel: event.channel,
+            text: '채널을 찾을 수 없습니다. 관리자에게 문의해주세요.',
+          });
+          return res.status(200).send('ok');
+        }
+
+        await client.chat.postMessage({
+          channel: channel.id,
+          text: `💬 *익명 질문*\n\n${event.text}`,
+          blocks: [
             {
-              type: 'mrkdwn',
-              text: '익명으로 제출된 질문입니다. 스레드로 답변해주세요.',
+              type: 'section',
+              text: {
+                type: 'mrkdwn',
+                text: `💬 *익명 질문*\n\n${event.text}`,
+              },
+            },
+            {
+              type: 'context',
+              elements: [
+                {
+                  type: 'mrkdwn',
+                  text: '익명으로 제출된 질문입니다. 스레드로 답변해주세요.',
+                },
+              ],
             },
           ],
-        },
-      ],
-    });
+        });
 
-    // 질문자에게 확인 메시지
-    await say('질문이 익명으로 등록됐습니다. 답변이 달리면 채널에서 확인하세요.');
-  } catch (error) {
-    console.error('Error:', error);
-    await say('오류가 발생했습니다. 잠시 후 다시 시도해주세요.');
+        await client.chat.postMessage({
+          channel: event.channel,
+          text: '질문이 익명으로 등록됐습니다. 답변이 달리면 채널에서 확인하세요.',
+        });
+      } catch (error) {
+        console.error('Error:', error);
+      }
+    }
   }
-});
 
-// Vercel serverless function
-module.exports = receiver.app;
+  return res.status(200).send('ok');
+};
