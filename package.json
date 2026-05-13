@@ -1,0 +1,14 @@
+{
+  "name": "ax-anon-bot",
+  "version": "1.0.0",
+  "description": "AX 익명 질문 봇",
+  "main": "api/slack/events.js",
+  "scripts": {
+    "start": "node api/slack/events.js",
+    "dev": "node api/slack/events.js"
+  },
+  "dependencies": {
+    "@slack/bolt": "^3.17.1",
+    "@slack/web-api": "^7.0.2"
+  }
+}
