@@ -4,13 +4,8 @@ const crypto = require('crypto');
 const client = new WebClient(process.env.SLACK_BOT_TOKEN);
 const TARGET_CHANNEL = 'ax_라운지';
 
-function verifySlackSignature(req, rawBody) {
-  const timestamp = req.headers['x-slack-request-timestamp'];
-  const slackSignature = req.headers['x-slack-signature'];
-
+function verifySlackSignature(timestamp, slackSignature, rawBody) {
   if (!timestamp || !slackSignature) return false;
-
-  // 5분 이상 된 요청 거부
   if (Math.abs(Date.now() / 1000 - Number(timestamp)) > 300) return false;
 
   const sigBase = `v0:${timestamp}:${rawBody}`;
@@ -20,16 +15,11 @@ function verifySlackSignature(req, rawBody) {
     .digest('hex');
   const computed = `v0=${hmac}`;
 
-  return crypto.timingSafeEqual(Buffer.from(computed), Buffer.from(slackSignature));
-}
-
-async function getRawBody(req) {
-  return new Promise((resolve, reject) => {
-    let data = '';
-    req.on('data', (chunk) => (data += chunk));
-    req.on('end', () => resolve(data));
-    req.on('error', reject);
-  });
+  try {
+    return crypto.timingSafeEqual(Buffer.from(computed), Buffer.from(slackSignature));
+  } catch {
+    return false;
+  }
 }
 
 module.exports = async (req, res) => {
@@ -37,15 +27,20 @@ module.exports = async (req, res) => {
     return res.status(405).send('Method Not Allowed');
   }
 
-  const rawBody = await getRawBody(req);
-  const body = JSON.parse(rawBody);
+  // Vercel은 body를 이미 파싱해서 req.body로 넘김
+  // 서명 검증용 rawBody는 req.body를 다시 직렬화
+  const body = req.body;
+  const rawBody = JSON.stringify(body);
 
   // URL 검증 challenge는 서명 검증 없이 즉시 응답
   if (body.type === 'url_verification') {
     return res.status(200).json({ challenge: body.challenge });
   }
 
-  if (!verifySlackSignature(req, rawBody)) {
+  const timestamp = req.headers['x-slack-request-timestamp'];
+  const slackSignature = req.headers['x-slack-signature'];
+
+  if (!verifySlackSignature(timestamp, slackSignature, rawBody)) {
     return res.status(401).send('Unauthorized');
   }
 
