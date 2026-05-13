@@ -38,16 +38,15 @@ module.exports = async (req, res) => {
   }
 
   const rawBody = await getRawBody(req);
+  const body = JSON.parse(rawBody);
+
+  // URL 검증 challenge는 서명 검증 없이 즉시 응답
+  if (body.type === 'url_verification') {
+    return res.status(200).json({ challenge: body.challenge });
+  }
 
   if (!verifySlackSignature(req, rawBody)) {
     return res.status(401).send('Unauthorized');
-  }
-
-  const body = JSON.parse(rawBody);
-
-  // URL 검증 challenge
-  if (body.type === 'url_verification') {
-    return res.status(200).json({ challenge: body.challenge });
   }
 
   // 이벤트 처리
